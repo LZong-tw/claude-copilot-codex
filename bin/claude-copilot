@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# claude-copilot — run Claude Code backed by GitHub Copilot / Codex via copilot-api.
+#
+# Isolated by design: it never touches your global ~/.claude/settings.json.
+# It launches `claude --settings <this tool's settings.json>` so your existing
+# Claude Code setup (e.g. a company gateway) stays untouched.
+#
+# Subcommands:
+#   claude-copilot                 start server (if needed) + open Claude Code
+#   claude-copilot <args...>       same, passing args straight to `claude`
+#   claude-copilot start           start the copilot-api server only
+#   claude-copilot stop            stop the server
+#   claude-copilot status          show server health
+#   claude-copilot models          list Copilot models (/v1/models)
+#   claude-copilot codex-models    list standalone Codex models (/codex/v1/models)
+#   claude-copilot usage           Copilot quota + local token usage (incl. Codex)
+#   claude-copilot auth            run both OAuth logins (copilot + codex)
+set -euo pipefail
+
+CONFIG_DIR="${CLAUDE_COPILOT_HOME:-$HOME/.config/claude-copilot}"
+PORT="${COPILOT_API_PORT:-4141}"
+BASE_URL="http://localhost:${PORT}"
+SETTINGS="${CONFIG_DIR}/settings.json"
+LOG_FILE="${CONFIG_DIR}/server.log"
+PID_FILE="${CONFIG_DIR}/server.pid"
+DATA_DIR="${HOME}/.local/share/copilot-api"
+USAGE_DB="${DATA_DIR}/copilot-api.sqlite"
+
+# Make bun/npm global bins discoverable.
+export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
+
+mkdir -p "${CONFIG_DIR}"
+
+die() { echo "[claude-copilot] $*" >&2; exit 1; }
+
+have_copilot_api() { command -v copilot-api >/dev/null 2>&1; }
+
+ensure_copilot_api() {
+  have_copilot_api && return 0
+  die "copilot-api not found. Install it with:  bun add -g @jeffreycao/copilot-api@latest  (or npm i -g)"
+}
+
+ensure_settings() {
+  [ -f "${SETTINGS}" ] && return 0
+  die "missing ${SETTINGS}. Run ./install.sh or copy settings.example.json there."
+}
+
+is_up() { curl -fsS "${BASE_URL}/v1/models" >/dev/null 2>&1; }
+
+start_server() {
+  if is_up; then echo "[claude-copilot] server already up at ${BASE_URL}"; return 0; fi
+  ensure_copilot_api
+  echo "[claude-copilot] starting copilot-api on port ${PORT} ..."
+  nohup copilot-api start --port "${PORT}" >"${LOG_FILE}" 2>&1 &
+  echo $! > "${PID_FILE}"
+  for _ in $(seq 1 30); do
+    if is_up; then echo "[claude-copilot] up."; return 0; fi
+    sleep 1
+  done
+  echo "[claude-copilot] server did not become healthy. Check ${LOG_FILE}" >&2
+  echo "[claude-copilot] Most likely you are not logged in. Run:  claude-copilot auth" >&2
+  return 1
+}
+
+stop_server() {
+  if [ -f "${PID_FILE}" ]; then
+    local p; p="$(cat "${PID_FILE}")"
+    kill "${p}" 2>/dev/null && echo "[claude-copilot] stopped (pid ${p})." || echo "[claude-copilot] not running."
+    rm -f "${PID_FILE}"
+  else
+    echo "[claude-copilot] no pidfile; server may be running in another terminal."
+  fi
+}
+
+cmd_usage() {
+  echo "[claude-copilot] Copilot quota (remaining):"
+  curl -fsS "${BASE_URL}/usage" 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);q=d.get('quota_snapshots',{});print('  plan:',d.get('copilot_plan'),'| reset:',d.get('quota_reset_date'));[print(f\"  {k}: {v.get('percent_remaining')}% remaining\"+(' (unlimited)' if v.get('unlimited') else '')) for k,v in q.items()]" 2>/dev/null || echo "  (server down or not logged in)"
+  echo
+  if [ -f "${USAGE_DB}" ] && command -v sqlite3 >/dev/null 2>&1; then
+    echo "[claude-copilot] Local token usage by provider/model (incl. Codex):"
+    sqlite3 -header -column "${USAGE_DB}" "SELECT COALESCE(provider_name,'copilot') AS provider, model, COUNT(*) AS reqs, SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok, SUM(total_tokens) AS total FROM token_usage_events GROUP BY provider_name, model ORDER BY total DESC;" 2>/dev/null
+    echo
+  fi
+  echo "Note: standalone Codex (codex/* models) remaining quota lives on your ChatGPT plan,"
+  echo "      not here. Check it at https://chatgpt.com account settings."
+}
+
+case "${1:-}" in
+  start)        start_server; exit $? ;;
+  stop)         stop_server; exit 0 ;;
+  status)       is_up && echo "[claude-copilot] UP at ${BASE_URL}" || echo "[claude-copilot] DOWN"; exit 0 ;;
+  models)       is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/v1/models"; exit 0 ;;
+  codex-models) is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/codex/v1/models"; exit 0 ;;
+  usage)        cmd_usage; exit 0 ;;
+  auth)
+    ensure_copilot_api
+    echo "[claude-copilot] === GitHub Copilot login (device flow) ==="
+    copilot-api auth login --provider copilot || true
+    echo "[claude-copilot] === Codex / ChatGPT login (browser OAuth) ==="
+    copilot-api auth login --provider codex || true
+    exit 0 ;;
+esac
+
+ensure_settings
+start_server
+exec claude --settings "${SETTINGS}" "$@"

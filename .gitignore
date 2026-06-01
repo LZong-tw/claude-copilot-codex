@@ -1,0 +1,9 @@
+# Ignore anything that could leak credentials or local state.
+*.log
+server.pid
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+**/codex_credentials.json
+**/github_token
+.DS_Store
