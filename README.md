@@ -1,4 +1,4 @@
-# claude-copilot
+# claude-copilot-codex
 
 Run **Claude Code** with **GitHub Copilot** and/or **OpenAI Codex (ChatGPT)** as the
 backend — without touching your existing `~/.claude/settings.json`.
