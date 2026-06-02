@@ -12,6 +12,7 @@
 #   claude-copilot stop            stop the server
 #   claude-copilot status          show server health
 #   claude-copilot models          list all Copilot + Codex models for Claude Code
+#   claude-copilot pick-model      interactively set the default Claude Code model
 #   claude-copilot copilot-models  list raw Copilot models (/v1/models)
 #   claude-copilot codex-models    list standalone Codex models (/codex/v1/models)
 #   claude-copilot usage           Copilot quota + local token usage (incl. Codex)
@@ -231,6 +232,87 @@ PY
   echo "Catalog saved to: ${MODEL_CATALOG}"
 }
 
+cmd_pick_model() {
+  refresh_model_catalog
+  python3 - "${MODEL_CATALOG}" "${SETTINGS}" "$@" <<'PY'
+import json
+import pathlib
+import sys
+
+catalog_path = pathlib.Path(sys.argv[1])
+settings_path = pathlib.Path(sys.argv[2])
+args = sys.argv[3:]
+
+catalog = json.loads(catalog_path.read_text())
+settings = json.loads(settings_path.read_text())
+env = settings.setdefault("env", {})
+current = env.get("ANTHROPIC_MODEL", "")
+models = [item for item in catalog["models"] if item.get("kind") == "chat"]
+by_id = {item["claude_model"]: item for item in models}
+
+def usage():
+    print("Usage:")
+    print("  claude-copilot pick-model")
+    print("  claude-copilot pick-model <model-id>")
+    print()
+    print("Examples:")
+    print("  claude-copilot pick-model gpt-5.5")
+    print("  claude-copilot pick-model codex/gpt-5.4")
+
+if args and args[0] in {"-h", "--help"}:
+    usage()
+    raise SystemExit(0)
+
+if args:
+    selected = args[0]
+    if selected not in by_id:
+        print(f"Unknown model: {selected}", file=sys.stderr)
+        matches = [model for model in by_id if selected.lower() in model.lower()]
+        if matches:
+            print("Did you mean:", file=sys.stderr)
+            for model in matches[:10]:
+                print(f"  {model}", file=sys.stderr)
+        raise SystemExit(2)
+else:
+    print("Select Claude Code model for claude-copilot")
+    print(f"Current default: {current or '(unset)'}")
+    print()
+    for index, item in enumerate(models, 1):
+        mark = " *" if item["claude_model"] == current else ""
+        quota = "ChatGPT" if item["provider"] == "codex" else "Copilot"
+        print(f"{index:2d}. {item['claude_model']:<30} {item['provider']:<7} {quota}{mark}")
+    print()
+    try:
+        raw = input("Choose number or model id (blank keeps current): ").strip()
+    except EOFError:
+        raw = ""
+    if not raw:
+        print("Model unchanged.")
+        raise SystemExit(0)
+    if raw.isdigit():
+        index = int(raw)
+        if index < 1 or index > len(models):
+            print(f"Selection out of range: {raw}", file=sys.stderr)
+            raise SystemExit(2)
+        selected = models[index - 1]["claude_model"]
+    else:
+        selected = raw
+        if selected not in by_id:
+            print(f"Unknown model: {selected}", file=sys.stderr)
+            raise SystemExit(2)
+
+env["ANTHROPIC_MODEL"] = selected
+tmp = settings_path.with_suffix(settings_path.suffix + ".tmp")
+tmp.write_text(json.dumps(settings, indent=2) + "\n")
+tmp.replace(settings_path)
+
+item = by_id[selected]
+quota = "ChatGPT" if item["provider"] == "codex" else "Copilot"
+print(f"Default model set to: {selected} ({item['provider']}, {quota})")
+print("Next launch will pass it to Claude Code as: --model " + selected)
+PY
+}
+
 start_server() {
   if is_up; then echo "[claude-copilot] server already up at ${BASE_URL}"; return 0; fi
   ensure_copilot_api
@@ -276,6 +358,11 @@ case "${1:-}" in
   models|all-models)
     is_up || die "server down (claude-copilot start)"
     cmd_models
+    exit 0 ;;
+  pick-model|select-model|model)
+    is_up || die "server down (claude-copilot start)"
+    shift
+    cmd_pick_model "$@"
     exit 0 ;;
   copilot-models) is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/v1/models"; exit 0 ;;
   codex-models) is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/codex/v1/models"; exit 0 ;;

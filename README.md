@@ -49,6 +49,8 @@ ChatGPT/Codex plan.
 ```sh
 claude-copilot auth          # one-time: Copilot device-flow + Codex browser OAuth
 claude-copilot models        # list all Copilot + Codex models usable by Claude Code
+claude-copilot pick-model    # interactive full model picker; saves default
+claude-copilot pick-model codex/gpt-5.4
 claude-copilot copilot-models # raw /v1/models
 claude-copilot codex-models  # raw /codex/v1/models
 claude-copilot               # start gateway (if needed) and open Claude Code
@@ -73,6 +75,11 @@ Use any chat model directly with `claude-copilot --model <id> ...`. If `--model`
 is omitted, the launcher passes the `ANTHROPIC_MODEL` from
 `~/.config/claude-copilot/settings.json` (default `claude-opus-4.8`). The small
 background model is `ANTHROPIC_DEFAULT_HAIKU_MODEL` (default `gpt-5.4-mini`).
+
+Claude Code's built-in `/model` picker only shows its built-in Claude aliases
+plus the three custom Opus/Sonnet/Haiku slots; it does not expose arbitrary
+gateway models. Use `claude-copilot pick-model` for the full Copilot + Codex
+list.
 
 Because `--setting-sources ""` intentionally prevents loading your global
 settings, the launcher copies through only the global `effortLevel` value by

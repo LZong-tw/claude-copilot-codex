@@ -114,6 +114,17 @@ claude-copilot --model gpt-5.5 "幫我看這段"
 claude-copilot --model codex/gpt-5.4 "幫我看這段"
 ```
 
+完整互動選單（會寫入預設 `ANTHROPIC_MODEL`）：
+
+```sh
+claude-copilot pick-model
+claude-copilot pick-model codex/gpt-5.4
+```
+
+Claude Code 內建 `/model` 目前只會列出內建 Claude alias 加上三個 custom
+Opus/Sonnet/Haiku slot，不會把任意 gateway model 全部展開；完整清單要用
+`claude-copilot pick-model` 或 `claude-copilot models`。
+
 如果你沒有手動給 `--model`，啟動器會把
 `~/.config/claude-copilot/settings.json` 裡的 `ANTHROPIC_MODEL` 轉成
 Claude Code 的 `--model` 參數。
