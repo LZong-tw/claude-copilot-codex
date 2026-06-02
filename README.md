@@ -1,5 +1,7 @@
 # claude-copilot-codex
 
+[繁體中文 README](README.zh-TW.md) · [Detailed setup](docs/SETUP.md) · [繁體中文設定文件](docs/SETUP.zh-TW.md)
+
 Run **Claude Code** with **GitHub Copilot** and/or **OpenAI Codex (ChatGPT)** as the
 backend — without touching your existing `~/.claude/settings.json`.
 
@@ -116,6 +118,8 @@ passing `--effort <value>` unless you already provided `--effort` yourself.
 - Use model ids like `claude-opus-4.8` / `codex/gpt-5.4` (no `[1m]` suffix).
   Sending context far beyond
   Copilot's window may get your account flagged.
+- The detailed setup guide is available in [English](docs/SETUP.md) and
+  [Traditional Chinese](docs/SETUP.zh-TW.md).
 - `WebSearch` is denied (Copilot API has no native web search) — install an MCP
   fetch/search tool instead if needed.
 - `copilot-api` reverse-engineers GitHub Copilot endpoints. **This may violate the

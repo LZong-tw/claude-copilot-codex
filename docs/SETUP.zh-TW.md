@@ -1,5 +1,7 @@
 # Claude Code × GitHub Copilot / Codex 設定文件
 
+[English setup](SETUP.md) · [繁體中文 README](../README.zh-TW.md) · [English README](../README.md)
+
 用 `caozhiyuan/copilot-api` 把 **GitHub Copilot + Codex（OAuth）** 包成本機
 Anthropic 相容 endpoint，讓 `claude`（Claude Code）當前端使用，**不影響**你既有的
 公司 gateway 設定。
