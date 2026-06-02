@@ -48,9 +48,12 @@ ChatGPT/Codex plan.
 
 ```sh
 claude-copilot auth          # one-time: Copilot device-flow + Codex browser OAuth
-claude-copilot models        # list Copilot models
-claude-copilot codex-models  # list standalone Codex models
+claude-copilot models        # list all Copilot + Codex models usable by Claude Code
+claude-copilot copilot-models # raw /v1/models
+claude-copilot codex-models  # raw /codex/v1/models
 claude-copilot               # start gateway (if needed) and open Claude Code
+claude-copilot --model gpt-5.5 "fix this"
+claude-copilot --model codex/gpt-5.4 "fix this"
 claude-copilot "fix this"    # any args pass through to `claude`
 claude-copilot status        # gateway health
 claude-copilot stop          # stop the gateway
@@ -59,21 +62,21 @@ claude-copilot usage         # Copilot quota + local token usage (incl. Codex)
 
 ## Choosing the model
 
-Edit `~/.config/claude-copilot/settings.json` (`env` block). Set the three main
-model vars together when switching engines:
+`claude-copilot models` refreshes `~/.config/claude-copilot/models.json` from both
+gateway endpoints and prints every model id Claude Code can receive:
 
-| Want | `ANTHROPIC_MODEL` / `_OPUS_` / `_SONNET_` | Quota source |
-| --- | --- | --- |
-| Copilot Claude (default) | `claude-opus-4.6` | Copilot |
-| Copilot-hosted Codex | `gpt-5.3-codex` | Copilot |
-| Standalone Codex (ChatGPT) | `codex/gpt-5.4` | ChatGPT plan |
+- Copilot `/v1/models` as-is, e.g. `claude-opus-4.8`, `gpt-5.5`, `gpt-5.3-codex`.
+- Codex `/codex/v1/models` with the required `codex/` prefix, e.g.
+  `codex/gpt-5.4`.
 
-`ANTHROPIC_DEFAULT_HAIKU_MODEL` is the small/background model (default `gpt-5-mini`).
-After changes: `claude-copilot stop && claude-copilot start`.
+Use any chat model directly with `claude-copilot --model <id> ...`. If `--model`
+is omitted, the launcher passes the `ANTHROPIC_MODEL` from
+`~/.config/claude-copilot/settings.json` (default `claude-opus-4.8`). The small
+background model is `ANTHROPIC_DEFAULT_HAIKU_MODEL` (default `gpt-5.4-mini`).
 
-Model lists depend on your plan — confirm with `claude-copilot models` /
-`claude-copilot codex-models`. Standalone Codex models are reached with the
-`codex/` prefix (the gateway doesn't list provider models in `/v1/models` by design).
+Because `--setting-sources ""` intentionally prevents loading your global
+settings, the launcher copies through only the global `effortLevel` value by
+passing `--effort <value>` unless you already provided `--effort` yourself.
 
 ## Usage & quota
 

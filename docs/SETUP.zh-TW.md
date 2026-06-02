@@ -96,29 +96,55 @@ claude-copilot "幫我看這段程式"   # 後面參數直接傳給 claude
 > 為什麼 `/v1/models` 看不到 Codex？這是 copilot-api 刻意設計——預設清單不聚合
 > provider 模型。Codex 模型在 `/codex/v1/models`，用 `codex/<model>` 前綴存取。
 
-### 改法：編輯 `~/.config/claude-copilot/settings.json` 的 `env`
+### 模型如何餵進 Claude Code
+
+`claude-copilot models` 會同時抓：
+
+- Copilot `/v1/models`：原樣餵給 Claude Code，例如 `claude-opus-4.8`、
+  `claude-sonnet-4.6`、`gpt-5.5`、`gpt-5.3-codex`、Gemini 等。
+- Codex `/codex/v1/models`：自動加上 `codex/` 前綴後餵給 Claude Code，例如
+  `codex/gpt-5.4`、`codex/gpt-5.4-mini`、`codex/gpt-5.5`。
+
+合併後的 catalog 會寫到 `~/.config/claude-copilot/models.json`。
+
+單次指定：
+
+```sh
+claude-copilot --model gpt-5.5 "幫我看這段"
+claude-copilot --model codex/gpt-5.4 "幫我看這段"
+```
+
+如果你沒有手動給 `--model`，啟動器會把
+`~/.config/claude-copilot/settings.json` 裡的 `ANTHROPIC_MODEL` 轉成
+Claude Code 的 `--model` 參數。
+
+`--setting-sources ""` 會刻意不讀公司用的全域 settings，所以啟動器會另外**只讀**
+`~/.claude/settings.json` 的 `effortLevel`，並原封不動用 `--effort <值>` 塞回
+Claude Code；如果你自己已經傳 `--effort`，就以你手動指定為準。
+
+### 預設模型設定：編輯 `~/.config/claude-copilot/settings.json` 的 `env`
 
 ```jsonc
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
     "ANTHROPIC_AUTH_TOKEN": "dummy",            // 本機不驗，任意字串
-    "ANTHROPIC_MODEL": "claude-opus-4.6",        // ← 改這行切主模型
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.6",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus-4.6",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5-mini" // 背景小任務（Copilot）
+    "ANTHROPIC_MODEL": "claude-opus-4.8",        // ← 沒手動 --model 時的主模型
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.8",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.4-mini" // 背景小任務（Copilot）
   }
 }
 ```
 
-### 用 Codex 當主力時，三個主模型一起改：
+### 用 Codex 當主力時：
 
-| 想用 | 把 OPUS/SONNET/MODEL 三個都設成 | 額度 | 實測 |
-|---|---|---|---|
-| Copilot 託管 codex | `gpt-5.3-codex` | Copilot | ✅ 回 copilot-codex-ok |
-| 你的 ChatGPT Codex | `codex/gpt-5.4` | ChatGPT | ✅ streaming 回 standalone-codex-ok |
+| 想用 | 單次指定 | 或把 `ANTHROPIC_MODEL` 設成 | 額度 | 實測 |
+|---|---|---|---|---|
+| Copilot 託管 codex | `--model gpt-5.3-codex` | `gpt-5.3-codex` | Copilot | ✅ |
+| 你的 ChatGPT Codex | `--model codex/gpt-5.4` | `codex/gpt-5.4` | ChatGPT | ✅ |
 
-改完 `claude-copilot stop && claude-copilot start` 重啟讓 cache 失效。
+改 settings 後不需要重啟 Claude Code server；下次執行 `claude-copilot` 會重新讀。
 
 > 註：獨立 Codex（`codex/…`）後端**強制 streaming + 需要 system**，Claude Code 本來
 > 就都會帶，正常使用沒問題；只有用裸 curl 少帶欄位才會看到
@@ -128,7 +154,7 @@ claude-copilot "幫我看這段程式"   # 後面參數直接傳給 claude
 
 ## 6. README 重要警告（務必遵守）
 
-- Claude Code 的 model ID 用 `claude-opus-4.6` / `claude-opus-4-6`，**不要加 `[1m]` 後綴**；
+- Claude Code 的 model ID 用 `claude-opus-4.8` / `claude-sonnet-4.6`，**不要加 `[1m]` 後綴**；
   丟超出 Copilot context window 太多的內容**可能被官方 ban**。
 - 已在隔離 settings 關掉非必要流量（`DISABLE_NON_ESSENTIAL_MODEL_CALLS` 等）以省 quota。
 - 已 `deny` WebSearch：Copilot API 不支援原生網搜，建議改裝 `mcp_server_fetch` 之類工具。
