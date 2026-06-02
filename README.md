@@ -5,7 +5,8 @@ backend — without touching your existing `~/.claude/settings.json`.
 
 It's a thin wrapper around [`@jeffreycao/copilot-api`](https://github.com/caozhiyuan/copilot-api)
 (a local OpenAI/Anthropic-compatible gateway for Copilot + Codex) plus an isolated
-launcher that starts the gateway and runs `claude --settings <isolated.json>`.
+launcher that starts the gateway and runs Claude Code with its own
+`CLAUDE_CONFIG_DIR`.
 
 ```
 claude (front end)
@@ -16,8 +17,10 @@ copilot-api (local gateway, :4141)
   └─ provider: codex   → OpenAI Codex / ChatGPT (browser OAuth)
 ```
 
-Your normal `claude` (e.g. a company gateway) is unaffected — this uses a separate
-settings file via `--settings`, so the two never collide.
+Your normal `claude` (e.g. a company gateway) is unaffected — this runs Claude Code
+under a separate `CLAUDE_CONFIG_DIR` (`~/.config/claude-copilot`), so the global
+`~/.claude` config — including any `apiKeyHelper`, MCP servers and plugins — is
+bypassed entirely and the two never collide.
 
 ## Why
 

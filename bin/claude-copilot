@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # claude-copilot — run Claude Code backed by GitHub Copilot / Codex via copilot-api.
 #
-# Isolated by design: it never touches your global ~/.claude/settings.json.
-# It launches `claude --settings <this tool's settings.json>` so your existing
-# Claude Code setup (e.g. a company gateway) stays untouched.
+# Isolated by design: it never touches your global ~/.claude config.
+# It runs Claude Code with its own CLAUDE_CONFIG_DIR, so your existing setup
+# (company gateway, apiKeyHelper, MCP servers, plugins) is fully bypassed and
+# left untouched. `--settings` only *layers on top of* the global config, which
+# still leaks the global apiKeyHelper (causing an "Auth conflict") — so we use a
+# dedicated config dir instead.
 #
 # Subcommands:
 #   claude-copilot                 start server (if needed) + open Claude Code
@@ -28,6 +31,12 @@ USAGE_DB="${DATA_DIR}/copilot-api.sqlite"
 
 # Make bun/npm global bins discoverable.
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
+
+# Full isolation: Claude Code reads settings.json (and stores its state) from
+# this dir instead of ~/.claude, so the global apiKeyHelper / MCP / plugins
+# never load. This is what prevents the ANTHROPIC_AUTH_TOKEN vs apiKeyHelper
+# "Auth conflict".
+export CLAUDE_CONFIG_DIR="${CONFIG_DIR}"
 
 mkdir -p "${CONFIG_DIR}"
 
@@ -103,4 +112,4 @@ esac
 
 ensure_settings
 start_server
-exec claude --settings "${SETTINGS}" "$@"
+exec claude "$@"
