@@ -45,4 +45,9 @@ Done. Next:
   1) claude-copilot auth      # one-time browser logins (Copilot + Codex)
   2) claude-copilot models    # verify
   3) claude-copilot           # launch Claude Code on Copilot/Codex
+
+Optional shell completion:
+  zsh:  source <(claude-copilot completion zsh)
+  bash: source <(claude-copilot completion bash)
+  fish: claude-copilot completion fish | source
 EOF

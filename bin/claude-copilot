@@ -15,6 +15,7 @@
 #   claude-copilot pick-model      interactively set the default Claude Code model
 #   claude-copilot copilot-models  list raw Copilot models (/v1/models)
 #   claude-copilot codex-models    list standalone Codex models (/codex/v1/models)
+#   claude-copilot completion zsh  print shell completion (zsh/bash/fish)
 #   claude-copilot usage           Copilot quota + local token usage (incl. Codex)
 #   claude-copilot auth            run both OAuth logins (copilot + codex)
 set -euo pipefail
@@ -313,6 +314,125 @@ print("Next launch will pass it to Claude Code as: --model " + selected)
 PY
 }
 
+cmd_complete_commands() {
+  printf '%s\n' \
+    auth \
+    start \
+    stop \
+    status \
+    models \
+    all-models \
+    pick-model \
+    select-model \
+    model \
+    copilot-models \
+    codex-models \
+    usage \
+    completion
+}
+
+cmd_complete_models() {
+  if is_up; then
+    refresh_model_catalog >/dev/null 2>&1 || true
+  fi
+  [ -f "${MODEL_CATALOG}" ] || return 0
+  python3 - "${MODEL_CATALOG}" <<'PY'
+import json
+import sys
+
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(0)
+
+for item in data.get("models", []):
+    if item.get("kind") == "chat":
+        print(item["claude_model"])
+PY
+}
+
+cmd_completion() {
+  local shell="${1:-zsh}"
+  case "${shell}" in
+    zsh)
+      cat <<'EOF'
+#compdef claude-copilot
+
+_claude_copilot() {
+  local -a commands models
+  commands=("${(@f)$(claude-copilot _complete-commands 2>/dev/null)}")
+
+  if (( CURRENT == 2 )); then
+    _describe 'command' commands
+    return
+  fi
+
+  if [[ "${words[CURRENT-1]}" == "--model" || "${words[2]}" == "pick-model" || "${words[2]}" == "select-model" || "${words[2]}" == "model" ]]; then
+    models=("${(@f)$(claude-copilot _complete-models 2>/dev/null)}")
+    _describe 'model' models
+    return
+  fi
+
+  _arguments \
+    '--model[Claude Code model id]:model:->models' \
+    '--effort[Claude Code effort level]:effort:(low medium high xhigh max)' \
+    '*::arg:->args'
+
+  case "$state" in
+    models)
+      models=("${(@f)$(claude-copilot _complete-models 2>/dev/null)}")
+      _describe 'model' models
+      ;;
+  esac
+}
+
+_claude_copilot "$@"
+EOF
+      ;;
+    bash)
+      cat <<'EOF'
+_claude_copilot_complete() {
+  local cur prev words cword
+  COMPREPLY=()
+  if declare -F _get_comp_words_by_ref >/dev/null 2>&1; then
+    _get_comp_words_by_ref -n : cur prev words cword
+  else
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    words=("${COMP_WORDS[@]}")
+    cword="${COMP_CWORD}"
+  fi
+
+  if [[ "${prev}" == "--model" || "${words[1]}" == "pick-model" || "${words[1]}" == "select-model" || "${words[1]}" == "model" ]]; then
+    COMPREPLY=( $(compgen -W "$(claude-copilot _complete-models 2>/dev/null)" -- "${cur}") )
+    return 0
+  fi
+
+  if [[ "${cword}" -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "$(claude-copilot _complete-commands 2>/dev/null)" -- "${cur}") )
+    return 0
+  fi
+
+  COMPREPLY=( $(compgen -W "--model --effort --permission-mode --help" -- "${cur}") )
+}
+
+complete -F _claude_copilot_complete claude-copilot
+EOF
+      ;;
+    fish)
+      cat <<'EOF'
+complete -c claude-copilot -f -n 'not __fish_seen_subcommand_from (claude-copilot _complete-commands)' -a '(claude-copilot _complete-commands)'
+complete -c claude-copilot -f -l model -d 'Claude Code model id' -a '(claude-copilot _complete-models)'
+complete -c claude-copilot -f -l effort -d 'Claude Code effort level' -a 'low medium high xhigh max'
+complete -c claude-copilot -f -n '__fish_seen_subcommand_from pick-model select-model model' -a '(claude-copilot _complete-models)'
+EOF
+      ;;
+    *)
+      die "unknown shell '${shell}'. Use: zsh, bash, or fish"
+      ;;
+  esac
+}
+
 start_server() {
   if is_up; then echo "[claude-copilot] server already up at ${BASE_URL}"; return 0; fi
   ensure_copilot_api
@@ -352,6 +472,12 @@ cmd_usage() {
 }
 
 case "${1:-}" in
+  _complete-commands) cmd_complete_commands; exit 0 ;;
+  _complete-models)   cmd_complete_models; exit 0 ;;
+  completion|completions)
+    shift
+    cmd_completion "${1:-zsh}"
+    exit 0 ;;
   start)        start_server; exit $? ;;
   stop)         stop_server; exit 0 ;;
   status)       is_up && echo "[claude-copilot] UP at ${BASE_URL}" || echo "[claude-copilot] DOWN"; exit 0 ;;

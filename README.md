@@ -51,6 +51,7 @@ claude-copilot auth          # one-time: Copilot device-flow + Codex browser OAu
 claude-copilot models        # list all Copilot + Codex models usable by Claude Code
 claude-copilot pick-model    # interactive full model picker; saves default
 claude-copilot pick-model codex/gpt-5.4
+claude-copilot completion zsh # shell completion; also supports bash/fish
 claude-copilot copilot-models # raw /v1/models
 claude-copilot codex-models  # raw /codex/v1/models
 claude-copilot               # start gateway (if needed) and open Claude Code
@@ -79,7 +80,19 @@ background model is `ANTHROPIC_DEFAULT_HAIKU_MODEL` (default `gpt-5.4-mini`).
 Claude Code's built-in `/model` picker only shows its built-in Claude aliases
 plus the three custom Opus/Sonnet/Haiku slots; it does not expose arbitrary
 gateway models. Use `claude-copilot pick-model` for the full Copilot + Codex
-list.
+list, or enable shell completion so `claude-copilot --model <TAB>` completes
+every chat model from the catalog:
+
+```sh
+# zsh
+source <(claude-copilot completion zsh)
+
+# bash
+source <(claude-copilot completion bash)
+
+# fish
+claude-copilot completion fish | source
+```
 
 Because `--setting-sources ""` intentionally prevents loading your global
 settings, the launcher copies through only the global `effortLevel` value by
@@ -97,7 +110,8 @@ passing `--effort <value>` unless you already provided `--effort` yourself.
 
 ## Notes & caveats
 
-- Use model id `claude-opus-4.6` (no `[1m]` suffix). Sending context far beyond
+- Use model ids like `claude-opus-4.8` / `codex/gpt-5.4` (no `[1m]` suffix).
+  Sending context far beyond
   Copilot's window may get your account flagged.
 - `WebSearch` is denied (Copilot API has no native web search) — install an MCP
   fetch/search tool instead if needed.

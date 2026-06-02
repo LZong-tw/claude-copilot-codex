@@ -123,7 +123,22 @@ claude-copilot pick-model codex/gpt-5.4
 
 Claude Code 內建 `/model` 目前只會列出內建 Claude alias 加上三個 custom
 Opus/Sonnet/Haiku slot，不會把任意 gateway model 全部展開；完整清單要用
-`claude-copilot pick-model` 或 `claude-copilot models`。
+`claude-copilot pick-model` 或 `claude-copilot models`。要讓內建 `/model`
+真的顯示所有 gateway model，基本上就要 patch / hack Claude Code client 本體；
+這會很脆弱（Claude Code 更新就可能失效），不適合公開 repo 預設走這條。
+
+比較穩的做法是開 shell completion，讓 `--model <TAB>` 直接補完整清單：
+
+```sh
+# zsh
+source <(claude-copilot completion zsh)
+
+# bash
+source <(claude-copilot completion bash)
+
+# fish
+claude-copilot completion fish | source
+```
 
 如果你沒有手動給 `--model`，啟動器會把
 `~/.config/claude-copilot/settings.json` 裡的 `ANTHROPIC_MODEL` 轉成
