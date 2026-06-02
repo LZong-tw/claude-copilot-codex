@@ -103,6 +103,9 @@ passing `--effort <value>` unless you already provided `--effort` yourself.
 - `claude-copilot usage` shows **Copilot** quota (from `/usage`) and **local token
   counts per provider/model** (from `~/.local/share/copilot-api/copilot-api.sqlite`),
   including standalone Codex requests (`provider_name = codex`).
+- See [`docs/COPILOT_MODEL_DEGRADATION.zh-TW.md`](docs/COPILOT_MODEL_DEGRADATION.zh-TW.md)
+  for model-by-model capability degradation estimates versus full Claude Code
+  1M context + high-effort usage.
 - Standalone Codex **remaining** quota is **not** visible here — it lives on your
   ChatGPT plan (check at chatgpt.com). Copilot-hosted `gpt-5.3-codex` *does* count
   against Copilot quota and shows in the dashboard.

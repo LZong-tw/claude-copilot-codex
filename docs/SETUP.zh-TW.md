@@ -148,6 +148,9 @@ Claude Code 的 `--model` 參數。
 `~/.claude/settings.json` 的 `effortLevel`，並原封不動用 `--effort <值>` 塞回
 Claude Code；如果你自己已經傳 `--effort`，就以你手動指定為準。
 
+各 Copilot 模型相對完整 Claude Code 1M context + 高 effort 的能力減損估算，見
+[`docs/COPILOT_MODEL_DEGRADATION.zh-TW.md`](COPILOT_MODEL_DEGRADATION.zh-TW.md)。
+
 ### 預設模型設定：編輯 `~/.config/claude-copilot/settings.json` 的 `env`
 
 ```jsonc
