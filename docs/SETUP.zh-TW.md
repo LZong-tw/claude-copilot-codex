@@ -19,8 +19,9 @@ copilot-api (本機 gateway, port 4141)
 
 - `copilot-api` 出算力 + 處理 OAuth 登入與 token 自動刷新。
 - 公司用的 `~/.claude/settings.json`（`llm-gateway.kkcompany-internal.com`）**完全沒被更動**。
-  本方案讓 Claude Code 改用獨立的 `CLAUDE_CONFIG_DIR`（`~/.config/claude-copilot`），
-  全域的 `apiKeyHelper`／MCP／plugin 都不會載入，互不干擾。
+  啟動器會用乾淨環境，並用
+  `claude --setting-sources "" --settings ~/.config/claude-copilot/settings.json`
+  啟動，避免 Claude Code 載入全域 `apiKeyHelper`／MCP／plugin；你的全域設定不會被改。
 
 ---
 
@@ -29,7 +30,7 @@ copilot-api (本機 gateway, port 4141)
 | 項目 | 路徑 | 說明 |
 |---|---|---|
 | copilot-api | `~/.bun/bin/copilot-api`（v1.10.28，bun global） | 本機 gateway |
-| 隔離 config 目錄 | `~/.config/claude-copilot/`（`CLAUDE_CONFIG_DIR`） | Claude Code 的獨立 home，含 `settings.json`、sessions、plugins，全與 `~/.claude` 隔離 |
+| 隔離 config 目錄 | `~/.config/claude-copilot/` | Claude Code 的獨立 settings/log/session 目錄；啟動時用 `--setting-sources ""` 避免讀取全域設定 |
 | 啟動器 | `~/.local/bin/claude-copilot` | 自動拉起 server 再開 claude |
 | server log | `~/.config/claude-copilot/server.log` | 排錯看這裡 |
 

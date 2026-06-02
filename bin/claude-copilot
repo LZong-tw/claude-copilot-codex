@@ -32,10 +32,10 @@ USAGE_DB="${DATA_DIR}/copilot-api.sqlite"
 # Make bun/npm global bins discoverable.
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 
-# Full isolation: Claude Code reads settings.json (and stores its state) from
-# this dir instead of ~/.claude, so the global apiKeyHelper / MCP / plugins
-# never load. This is what prevents the ANTHROPIC_AUTH_TOKEN vs apiKeyHelper
-# "Auth conflict".
+# Full isolation: start Claude through a clean process env and suppress the
+# normal user/project/local setting sources. Without --setting-sources "", an
+# existing ~/.claude/settings.json apiKeyHelper is still loaded and conflicts
+# with this tool's ANTHROPIC_AUTH_TOKEN.
 export CLAUDE_CONFIG_DIR="${CONFIG_DIR}"
 
 mkdir -p "${CONFIG_DIR}"
@@ -52,6 +52,24 @@ ensure_copilot_api() {
 ensure_settings() {
   [ -f "${SETTINGS}" ] && return 0
   die "missing ${SETTINGS}. Run ./install.sh or copy settings.example.json there."
+}
+
+harden_settings() {
+  python3 - "${SETTINGS}" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text())
+if data.get("apiKeyHelper") == "":
+    raise SystemExit(0)
+
+data["apiKeyHelper"] = ""
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(data, indent=2) + "\n")
+tmp.replace(path)
+PY
 }
 
 is_up() { curl -fsS "${BASE_URL}/v1/models" >/dev/null 2>&1; }
@@ -111,5 +129,15 @@ case "${1:-}" in
 esac
 
 ensure_settings
+harden_settings
 start_server
-exec claude "$@"
+exec env -i \
+  HOME="${HOME}" \
+  USER="${USER:-}" \
+  LOGNAME="${LOGNAME:-${USER:-}}" \
+  SHELL="${SHELL:-/bin/zsh}" \
+  TERM="${TERM:-xterm-256color}" \
+  TMPDIR="${TMPDIR:-/tmp}" \
+  PATH="${PATH}" \
+  CLAUDE_CONFIG_DIR="${CONFIG_DIR}" \
+  claude --setting-sources "" --settings "${SETTINGS}" "$@"

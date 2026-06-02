@@ -17,10 +17,10 @@ copilot-api (local gateway, :4141)
   └─ provider: codex   → OpenAI Codex / ChatGPT (browser OAuth)
 ```
 
-Your normal `claude` (e.g. a company gateway) is unaffected — this runs Claude Code
-under a separate `CLAUDE_CONFIG_DIR` (`~/.config/claude-copilot`), so the global
-`~/.claude` config — including any `apiKeyHelper`, MCP servers and plugins — is
-bypassed entirely and the two never collide.
+Your normal `claude` (e.g. a company gateway) is unaffected. The launcher uses
+a clean process environment plus `claude --setting-sources "" --settings ...`,
+so Claude Code does not load your global `~/.claude/settings.json` while this
+mode is running.
 
 ## Why
 
