@@ -17,6 +17,8 @@
 #   claude-copilot codex-models    list standalone Codex models (/codex/v1/models)
 #   claude-copilot completion zsh  print shell completion (zsh/bash/fish)
 #   claude-copilot usage           Copilot quota + local token usage (incl. Codex)
+#   claude-copilot patch-api-version
+#                                    patch copilot-api to use VS Code's current models API version
 #   claude-copilot auth            run both OAuth logins (copilot + codex)
 set -euo pipefail
 
@@ -30,6 +32,7 @@ PID_FILE="${CONFIG_DIR}/server.pid"
 DATA_DIR="${HOME}/.local/share/copilot-api"
 USAGE_DB="${DATA_DIR}/copilot-api.sqlite"
 GLOBAL_SETTINGS="${CLAUDE_COPILOT_SOURCE_SETTINGS:-$HOME/.claude/settings.json}"
+COPILOT_UPSTREAM_API_VERSION="${CLAUDE_COPILOT_UPSTREAM_API_VERSION:-2026-06-01}"
 
 # Make bun/npm global bins discoverable.
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
@@ -49,6 +52,61 @@ have_copilot_api() { command -v copilot-api >/dev/null 2>&1; }
 ensure_copilot_api() {
   have_copilot_api && return 0
   die "copilot-api not found. Install it with:  bun add -g @jeffreycao/copilot-api@latest  (or npm i -g)"
+}
+
+patch_copilot_api_version() {
+  ensure_copilot_api
+  [ -n "${COPILOT_UPSTREAM_API_VERSION}" ] || return 0
+  python3 - "$(command -v copilot-api)" "${COPILOT_UPSTREAM_API_VERSION}" <<'PY'
+import pathlib
+import re
+import shutil
+import sys
+
+bin_path = pathlib.Path(sys.argv[1]).resolve()
+version = sys.argv[2]
+if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", version):
+    raise SystemExit(f"invalid Copilot API version: {version}")
+
+candidate_dirs = []
+for parent in [bin_path.parent, *bin_path.parents[:6]]:
+    candidate_dirs.extend(
+        [
+            parent,
+            parent / "dist",
+            parent / "node_modules" / "@jeffreycao" / "copilot-api" / "dist",
+            parent / "lib" / "node_modules" / "@jeffreycao" / "copilot-api" / "dist",
+            parent / ".." / "lib" / "node_modules" / "@jeffreycao" / "copilot-api" / "dist",
+        ]
+    )
+
+seen = set()
+bundles = []
+for dist in candidate_dirs:
+    dist = dist.resolve()
+    if dist in seen:
+        continue
+    seen.add(dist)
+    bundles.extend(dist.glob("token-*.js"))
+
+if not bundles:
+    raise SystemExit(f"cannot find copilot-api token bundle near {bin_path}")
+
+pattern = re.compile(r'const API_VERSION = "\d{4}-\d{2}-\d{2}"')
+for bundle in bundles:
+    text = bundle.read_text()
+    match = pattern.search(text)
+    if not match:
+        continue
+    replacement = f'const API_VERSION = "{version}"'
+    if match.group(0) == replacement:
+        continue
+    backup = bundle.with_suffix(bundle.suffix + ".bak")
+    if not backup.exists():
+        shutil.copy2(bundle, backup)
+    bundle.write_text(pattern.sub(replacement, text, count=1))
+    print(f"[claude-copilot] patched {bundle.name}: {match.group(0)} -> {replacement}")
+PY
 }
 
 ensure_settings() {
@@ -72,9 +130,9 @@ if data.get("apiKeyHelper") != "":
 
 env = data.setdefault("env", {})
 model_migrations = {
-    "ANTHROPIC_MODEL": {"claude-opus-4.6": "claude-opus-4.8"},
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": {"claude-opus-4.6": "claude-opus-4.8"},
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": {"claude-opus-4.6": "claude-sonnet-4.6"},
+    "ANTHROPIC_MODEL": {"claude-opus-4.6": "claude-opus-4-8", "claude-opus-4.8": "claude-opus-4-8"},
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": {"claude-opus-4.6": "claude-opus-4-8", "claude-opus-4.8": "claude-opus-4-8"},
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": {"claude-opus-4.6": "claude-sonnet-4-6", "claude-sonnet-4.6": "claude-sonnet-4-6"},
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": {"gpt-5-mini": "gpt-5.4-mini"},
 }
 for key, replacements in model_migrations.items():
@@ -101,6 +159,35 @@ has_cli_option() {
     esac
   done
   return 1
+}
+
+normalize_model_id() {
+  local model="$1"
+  case "${model}" in
+    *"[1m]") printf '%s\n' "${model%"[1m]"}" ;;
+    *) printf '%s\n' "${model}" ;;
+  esac
+}
+
+normalize_model_args() {
+  normalized_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --model)
+        normalized_args+=("$1")
+        shift
+        [ "$#" -gt 0 ] || die "--model requires a value"
+        normalized_args+=("$(normalize_model_id "$1")")
+        ;;
+      --model=*)
+        normalized_args+=("--model=$(normalize_model_id "${1#--model=}")")
+        ;;
+      *)
+        normalized_args+=("$1")
+        ;;
+    esac
+    shift
+  done
 }
 
 settings_env_value() {
@@ -147,16 +234,18 @@ PY
 }
 
 refresh_model_catalog() {
-  python3 - "${BASE_URL}" "${MODEL_CATALOG}" <<'PY'
+  python3 - "${BASE_URL}" "${MODEL_CATALOG}" "${COPILOT_UPSTREAM_API_VERSION}" <<'PY'
 import datetime as dt
 import json
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.request
 
 base_url = sys.argv[1].rstrip("/")
 out = pathlib.Path(sys.argv[2])
+api_version = sys.argv[3]
 
 def load(path):
     url = f"{base_url}{path}"
@@ -170,18 +259,41 @@ def model_record(item, provider, source):
     model_id = upstream_id
     if provider == "codex" and not upstream_id.startswith("codex/"):
         model_id = f"codex/{upstream_id}"
+    request_id = model_id[:-4] if provider == "copilot" and model_id.endswith("[1m]") else model_id
 
     capabilities = item.get("capabilities") or {}
     limits = capabilities.get("limits") or {}
     supports = capabilities.get("supports") or {}
+    billing = item.get("billing") or {}
+    token_prices = billing.get("token_prices") or {}
     vision_limits = limits.get("vision") if isinstance(limits.get("vision"), dict) else {}
     kind = capabilities.get("type") or ("embedding" if "embedding" in model_id else "chat")
     if kind == "embeddings":
         kind = "embedding"
 
+    context_tiers = []
+    if isinstance(token_prices, dict):
+        default = token_prices.get("default") or {}
+        long_context = token_prices.get("long_context") or {}
+        default_context = default.get("context_max") if isinstance(default, dict) else None
+        long_context_max = long_context.get("context_max") if isinstance(long_context, dict) else None
+        if default_context:
+            context_tiers.append({"name": "default", "value": default_context})
+        if long_context_max and long_context_max != default_context:
+            context_tiers.append({"name": "long", "value": long_context_max})
+
+    aliases = []
+    if request_id != model_id:
+        aliases.append(model_id)
+    match = re.fullmatch(r"(claude-[a-z]+)-(\d+)-(\d+)", request_id)
+    if match:
+        aliases.append(f"{match.group(1)}-{match.group(2)}.{match.group(3)}")
+
     record = {
         "id": model_id,
-        "claude_model": model_id,
+        "claude_model": request_id,
+        "display_model": model_id,
+        "aliases": sorted(set(alias for alias in aliases if alias != request_id)),
         "provider": provider,
         "source": source,
         "kind": kind,
@@ -201,6 +313,7 @@ def model_record(item, provider, source):
         "structured_outputs": supports.get("structured_outputs"),
         "streaming": supports.get("streaming"),
         "price_category": item.get("model_picker_price_category") or "",
+        "context_tiers": context_tiers,
     }
     if provider == "codex":
         record["upstream_id"] = upstream_id
@@ -224,6 +337,7 @@ except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
 payload = {
     "generated_at": dt.datetime.now(dt.UTC).isoformat(),
     "base_url": base_url,
+    "copilot_upstream_api_version": api_version,
     "models": sorted(models, key=lambda item: (item["kind"] != "chat", item["provider"], item["id"])),
 }
 if errors:
@@ -248,17 +362,27 @@ def tokens(value):
     if value in (None, ""):
         return "-"
     if isinstance(value, (int, float)):
-        return f"{int(value / 1000)}k" if value >= 1000 else str(int(value))
+        if value >= 900000:
+            label = f"{value / 1000000:.1f}".rstrip("0").rstrip(".")
+            return f"{label}M"
+        return f"{int(round(value / 1000))}k" if value >= 1000 else str(int(value))
     return str(value)
 
 def effort(value):
     return "/".join(value) if value else "-"
 
+def tiers(value):
+    if not value:
+        return "-"
+    return "/".join(f"{tokens(item.get('value'))}({item.get('name')})" for item in value)
+
 print(f"generated_at: {data['generated_at']}")
 print(f"base_url: {data['base_url']}")
+if data.get("copilot_upstream_api_version"):
+    print(f"copilot_upstream_api_version: {data['copilot_upstream_api_version']}")
 print()
-print("provider  kind       ctx    prompt  output  effort                         claude-code --model")
-print("--------  ---------  -----  ------  ------  -----------------------------  -------------------")
+print("provider  kind       ctx    prompt  output  context tiers            effort                         claude-code --model")
+print("--------  ---------  -----  ------  ------  -----------------------  -----------------------------  -------------------")
 for item in data["models"]:
     print(
         f"{item['provider']:<8}  "
@@ -266,6 +390,7 @@ for item in data["models"]:
         f"{tokens(item.get('context_window')):<5}  "
         f"{tokens(item.get('max_prompt')):<6}  "
         f"{tokens(item.get('max_output')):<6}  "
+        f"{tiers(item.get('context_tiers')):<23}  "
         f"{effort(item.get('reasoning_effort')):<29}  "
         f"{item['claude_model']}"
     )
@@ -296,7 +421,12 @@ settings = json.loads(settings_path.read_text())
 env = settings.setdefault("env", {})
 current = env.get("ANTHROPIC_MODEL", "")
 models = [item for item in catalog["models"] if item.get("kind") == "chat"]
-by_id = {item["claude_model"]: item for item in models}
+by_id = {}
+for item in models:
+    by_id[item["claude_model"]] = item
+    by_id[item.get("display_model", item["claude_model"])] = item
+    for alias in item.get("aliases", []):
+        by_id[alias] = item
 
 def usage():
     print("Usage:")
@@ -321,6 +451,7 @@ if args:
             for model in matches[:10]:
                 print(f"  {model}", file=sys.stderr)
         raise SystemExit(2)
+    selected = by_id[selected]["claude_model"]
 else:
     print("Select Claude Code model for claude-copilot")
     print(f"Current default: {current or '(unset)'}")
@@ -329,9 +460,19 @@ else:
         mark = " *" if item["claude_model"] == current else ""
         quota = "ChatGPT" if item["provider"] == "codex" else "Copilot"
         ctx = item.get("context_window")
-        ctx_label = f"{int(ctx / 1000)}k" if isinstance(ctx, (int, float)) and ctx >= 1000 else "-"
+        if isinstance(ctx, (int, float)) and ctx >= 900000:
+            ctx_label = f"{ctx / 1000000:.1f}".rstrip("0").rstrip(".") + "M"
+        else:
+            ctx_label = f"{int(round(ctx / 1000))}k" if isinstance(ctx, (int, float)) and ctx >= 1000 else "-"
+        context_tiers = item.get("context_tiers") or []
+        tier_label = "/".join(
+            f"{int(round(tier.get('value', 0) / 1000))}k({tier.get('name')})"
+            if tier.get("value", 0) < 900000
+            else f"{tier.get('value') / 1000000:.1f}".rstrip("0").rstrip(".") + f"M({tier.get('name')})"
+            for tier in context_tiers
+        ) or "-"
         effort = "/".join(item.get("reasoning_effort") or []) or "-"
-        print(f"{index:2d}. {item['claude_model']:<30} {item['provider']:<7} {quota:<7} ctx {ctx_label:<5} effort {effort}{mark}")
+        print(f"{index:2d}. {item['claude_model']:<30} {item['provider']:<7} {quota:<7} ctx {ctx_label:<5} tiers {tier_label:<24} effort {effort}{mark}")
     print()
     try:
         raw = input("Choose number or model id (blank keeps current): ").strip()
@@ -351,6 +492,7 @@ else:
         if selected not in by_id:
             print(f"Unknown model: {selected}", file=sys.stderr)
             raise SystemExit(2)
+        selected = by_id[selected]["claude_model"]
 
 env["ANTHROPIC_MODEL"] = selected
 tmp = settings_path.with_suffix(settings_path.suffix + ".tmp")
@@ -378,6 +520,7 @@ cmd_complete_commands() {
     copilot-models \
     codex-models \
     usage \
+    patch-api-version \
     completion
 }
 
@@ -484,8 +627,27 @@ EOF
 }
 
 start_server() {
-  if is_up; then echo "[claude-copilot] server already up at ${BASE_URL}"; return 0; fi
   ensure_copilot_api
+  local patch_output
+  if ! patch_output="$(patch_copilot_api_version 2>&1)"; then
+    echo "${patch_output}" >&2
+    return 1
+  fi
+  [ -z "${patch_output}" ] || echo "${patch_output}"
+  if is_up; then
+    if [[ "${patch_output}" == *"[claude-copilot] patched "* ]]; then
+      if [ -f "${PID_FILE}" ]; then
+        echo "[claude-copilot] restarting gateway to load patched API version ..."
+        stop_server
+      else
+        echo "[claude-copilot] server already up at ${BASE_URL}; restart it to load patched API version."
+        return 0
+      fi
+    else
+      echo "[claude-copilot] server already up at ${BASE_URL}"
+      return 0
+    fi
+  fi
   echo "[claude-copilot] starting copilot-api on port ${PORT} ..."
   nohup copilot-api start --port "${PORT}" >"${LOG_FILE}" 2>&1 &
   echo $! > "${PID_FILE}"
@@ -543,6 +705,11 @@ case "${1:-}" in
   copilot-models) is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/v1/models"; exit 0 ;;
   codex-models) is_up || die "server down (claude-copilot start)"; curl -fsS "${BASE_URL}/codex/v1/models"; exit 0 ;;
   usage)        cmd_usage; exit 0 ;;
+  patch-api-version)
+    patch_copilot_api_version
+    echo "[claude-copilot] copilot-api API version is set to ${COPILOT_UPSTREAM_API_VERSION}."
+    echo "[claude-copilot] restart the server if it was already running."
+    exit 0 ;;
   auth)
     ensure_copilot_api
     echo "[claude-copilot] === GitHub Copilot login (device flow) ==="
@@ -556,12 +723,14 @@ ensure_settings
 harden_settings
 start_server
 refresh_model_catalog
+normalize_model_args "$@"
+set -- "${normalized_args[@]}"
 
 claude_args=(--setting-sources "" --settings "${SETTINGS}")
 if ! has_cli_option "--model" "$@"; then
   model="${CLAUDE_COPILOT_MODEL:-$(settings_env_value ANTHROPIC_MODEL)}"
   if [ -n "${model}" ]; then
-    claude_args+=(--model "${model}")
+    claude_args+=(--model "$(normalize_model_id "${model}")")
   fi
 fi
 if ! has_cli_option "--effort" "$@"; then

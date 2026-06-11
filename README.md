@@ -56,6 +56,7 @@ claude-copilot pick-model codex/gpt-5.4
 claude-copilot completion zsh # shell completion; also supports bash/fish
 claude-copilot copilot-models # raw /v1/models
 claude-copilot codex-models  # raw /codex/v1/models
+claude-copilot patch-api-version # patch copilot-api to VS Code's current models API
 claude-copilot               # start gateway (if needed) and open Claude Code
 claude-copilot --model gpt-5.5 "fix this"
 claude-copilot --model codex/gpt-5.4 "fix this"
@@ -69,15 +70,15 @@ claude-copilot usage         # Copilot quota + local token usage (incl. Codex)
 
 `claude-copilot models` refreshes `~/.config/claude-copilot/models.json` from both
 gateway endpoints and prints every model id Claude Code can receive, plus the
-reported context window, prompt/output limits, and reasoning effort levels:
+reported context window, prompt/output limits, context tiers, and reasoning effort levels:
 
-- Copilot `/v1/models` as-is, e.g. `claude-opus-4.8`, `gpt-5.5`, `gpt-5.3-codex`.
+- Copilot `/v1/models` as-is, e.g. `claude-opus-4-8`, `gpt-5.5`, `gpt-5.3-codex`.
 - Codex `/codex/v1/models` with the required `codex/` prefix, e.g.
   `codex/gpt-5.4`.
 
 Use any chat model directly with `claude-copilot --model <id> ...`. If `--model`
 is omitted, the launcher passes the `ANTHROPIC_MODEL` from
-`~/.config/claude-copilot/settings.json` (default `claude-opus-4.8`). The small
+`~/.config/claude-copilot/settings.json` (default `claude-opus-4-8`). The small
 background model is `ANTHROPIC_DEFAULT_HAIKU_MODEL` (default `gpt-5.4-mini`).
 
 Claude Code's built-in `/model` picker only shows its built-in Claude aliases
@@ -107,10 +108,19 @@ Effort is exposed through Claude Code's own `--effort` flag. Claude Code 2.1.159
 accepts `low`, `medium`, `high`, `xhigh`, and `max`; the launcher preserves your
 global `effortLevel` or your explicit `claude-copilot --effort ...` choice.
 
-Context window is not a local toggle. It is the server-side limit reported by
-your Copilot/Codex account for each model, so this repo can display and use the
-reported `context_window`, `max_prompt`, and `max_output` metadata, but it cannot
-unlock larger windows for other users. Check your live values with:
+Current VS Code Copilot uses a newer Copilot models API (`2026-06-01`) that
+returns context tiers such as `200K(default)` and `long` (`936k` or `922k`
+prompt, depending on model). The launcher patches the installed `copilot-api`
+bundle to use that API version before starting the gateway, because upstream
+`copilot-api` may still ship an older date. You can override it with
+`CLAUDE_COPILOT_UPSTREAM_API_VERSION` if the gateway catches up.
+
+Claude Code does not expose VS Code's Context Size picker here. The wrapper can
+show the same tier metadata and accepts aliases like `gpt-5.5[1m]`, but it strips
+the `[1m]` suffix before sending requests because the local gateway accepts
+`gpt-5.5`, not the display alias. It also cannot unlock larger windows for other
+accounts; the long-context tier has to appear in your own model metadata. Check
+your live values with:
 
 ```sh
 claude-copilot models
@@ -131,7 +141,7 @@ claude-copilot models
 
 ## Notes & caveats
 
-- Use model ids like `claude-opus-4.8` / `codex/gpt-5.4` (no `[1m]` suffix).
+- Use model ids like `claude-opus-4-8` / `codex/gpt-5.4` (no `[1m]` suffix).
   Sending context far beyond
   Copilot's window may get your account flagged.
 - The detailed setup guide is available in [English](docs/SETUP.md) and

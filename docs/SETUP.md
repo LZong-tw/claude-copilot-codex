@@ -96,7 +96,7 @@ To go back to your company gateway, use your normal `claude` command.
 Copilot `/v1/models` returns models such as:
 
 ```text
-claude-opus-4.6 / claude-opus-4.7 / claude-opus-4.8 / claude-sonnet-4.6
+claude-opus-4-6 / claude-opus-4-7 / claude-opus-4-8 / claude-sonnet-4-6
 gpt-5.4 / gpt-5.4-mini / gpt-5.5 / gpt-5.3-codex
 gemini-3.1-pro-preview / gemini-3.5-flash / gemini-2.5-pro / ...
 ```
@@ -112,10 +112,10 @@ Why does `/v1/models` not include standalone Codex? That is how `copilot-api` se
 ### How models are passed into Claude Code
 
 `claude-copilot models` fetches both endpoints, saves a merged catalog, and
-prints each model's reported context window, prompt/output limits, and reasoning
-effort levels:
+prints each model's reported context window, prompt/output limits, context
+tiers, and reasoning effort levels:
 
-- Copilot `/v1/models` as-is, e.g. `claude-opus-4.8`, `gpt-5.5`, `gpt-5.3-codex`.
+- Copilot `/v1/models` as-is, e.g. `claude-opus-4-8`, `gpt-5.5`, `gpt-5.3-codex`.
 - Codex `/codex/v1/models` with the required `codex/` prefix, e.g. `codex/gpt-5.4`.
 
 The merged catalog is saved to:
@@ -168,10 +168,15 @@ different things here:
   accepts `low`, `medium`, `high`, `xhigh`, and `max`; provider metadata may also
   report values like `none` or `minimal`, but those are not accepted by Claude
   Code's CLI today.
-- **Context window** is the server-side limit returned by the model metadata for
-  your account. The launcher displays `context_window`, `max_prompt`, and
-  `max_output`, but it cannot unlock larger windows for other users or force a
-  model beyond the account/model limit.
+- **Context window** comes from the model metadata for your account. Current VS
+  Code Copilot asks the Copilot models API with `x-github-api-version:
+  2026-06-01`, which exposes tiers like `200K(default)` and `long` (`936k` or
+  `922k` prompt, depending on model). The launcher patches the installed
+  `copilot-api` bundle to use that API version before starting the gateway.
+- **Claude Code has no Context Size picker** in this mode. The launcher displays
+  the same tier metadata and accepts display aliases like `gpt-5.5[1m]`, but it
+  sends the base model id (`gpt-5.5`) to the gateway. It cannot unlock larger
+  windows for other users or force a model beyond the account/model limit.
 
 Run this anytime to see your live account-specific values:
 
@@ -190,9 +195,9 @@ Edit `~/.config/claude-copilot/settings.json`:
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
     "ANTHROPIC_AUTH_TOKEN": "dummy",
-    "ANTHROPIC_MODEL": "claude-opus-4.8",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.8",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6",
+    "ANTHROPIC_MODEL": "claude-opus-4-8",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.4-mini"
   }
 }
@@ -213,7 +218,7 @@ Changing settings does not require restarting the gateway; the next `claude-copi
 
 ## 6. Important warnings
 
-- Use model ids like `claude-opus-4.8`, `claude-sonnet-4.6`, or `codex/gpt-5.4`; do **not** add a `[1m]` suffix.
+- Use model ids like `claude-opus-4-8`, `claude-sonnet-4-6`, or `codex/gpt-5.4`; do **not** add a `[1m]` suffix.
 - Sending context far beyond the Copilot model's window may get your account flagged.
 - Non-essential Claude Code traffic is disabled in the isolated settings to save quota.
 - `WebSearch` is denied because Copilot API does not support native web search. Use an MCP fetch/search tool instead if needed.
