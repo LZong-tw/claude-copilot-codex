@@ -59,6 +59,7 @@ claude-copilot codex-models  # raw /codex/v1/models
 claude-copilot patch-api-version # patch copilot-api to VS Code's current models API
 claude-copilot               # start gateway (if needed) and open Claude Code
 claude-copilot --model gpt-5.5 "fix this"
+claude-copilot --model gpt-5.5 --context long "fix this"
 claude-copilot --model codex/gpt-5.4 "fix this"
 claude-copilot "fix this"    # any args pass through to `claude`
 claude-copilot status        # gateway health
@@ -115,12 +116,29 @@ bundle to use that API version before starting the gateway, because upstream
 `copilot-api` may still ship an older date. You can override it with
 `CLAUDE_COPILOT_UPSTREAM_API_VERSION` if the gateway catches up.
 
-Claude Code does not expose VS Code's Context Size picker here. The wrapper can
-show the same tier metadata and accepts aliases like `gpt-5.5[1m]`, but it strips
-the `[1m]` suffix before sending requests because the local gateway accepts
-`gpt-5.5`, not the display alias. It also cannot unlock larger windows for other
-accounts; the long-context tier has to appear in your own model metadata. Check
-your live values with:
+Claude Code does not expose VS Code's Context Size picker here, but the launcher
+does provide a low-friction gateway-side approximation:
+
+```sh
+claude-copilot --model gpt-5.5 --context default   # compact near the default tier
+claude-copilot --model gpt-5.5 --context long      # compact near the long tier
+claude-copilot --model gpt-5.5 --context auto      # long if available, else default
+```
+
+This updates `~/.local/share/copilot-api/config.json`
+`modelResponsesApiCompactThresholds` for the selected model and restarts the
+launcher-managed gateway when needed, because `copilot-api` caches config in the
+server process. The threshold is `tier * 0.8` by default; override the ratio with
+`CLAUDE_COPILOT_CONTEXT_COMPACT_RATIO`. The setting persists in the gateway
+config until the next `--context ...` run; launching without `--context` leaves
+the current gateway threshold unchanged.
+
+This is not the same as a Claude Code-native context-size flag. It can reduce
+gateway-side Responses API compaction from happening too early, but it cannot
+force Claude Code itself to send more context. The wrapper also accepts aliases
+like `gpt-5.5[1m]`, then strips the `[1m]` suffix before sending requests because
+the local gateway accepts `gpt-5.5`, not the display alias. Check your live values
+with:
 
 ```sh
 claude-copilot models

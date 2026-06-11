@@ -15,6 +15,7 @@
 #   claude-copilot pick-model      interactively set the default Claude Code model
 #   claude-copilot copilot-models  list raw Copilot models (/v1/models)
 #   claude-copilot codex-models    list standalone Codex models (/codex/v1/models)
+#   claude-copilot --context long  set gateway compaction threshold from context tier metadata
 #   claude-copilot completion zsh  print shell completion (zsh/bash/fish)
 #   claude-copilot usage           Copilot quota + local token usage (incl. Codex)
 #   claude-copilot patch-api-version
@@ -30,9 +31,11 @@ MODEL_CATALOG="${CONFIG_DIR}/models.json"
 LOG_FILE="${CONFIG_DIR}/server.log"
 PID_FILE="${CONFIG_DIR}/server.pid"
 DATA_DIR="${HOME}/.local/share/copilot-api"
+COPILOT_CONFIG="${DATA_DIR}/config.json"
 USAGE_DB="${DATA_DIR}/copilot-api.sqlite"
 GLOBAL_SETTINGS="${CLAUDE_COPILOT_SOURCE_SETTINGS:-$HOME/.claude/settings.json}"
 COPILOT_UPSTREAM_API_VERSION="${CLAUDE_COPILOT_UPSTREAM_API_VERSION:-2026-06-01}"
+CONTEXT_COMPACT_RATIO="${CLAUDE_COPILOT_CONTEXT_COMPACT_RATIO:-0.8}"
 
 # Make bun/npm global bins discoverable.
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
@@ -169,10 +172,26 @@ normalize_model_id() {
   esac
 }
 
-normalize_model_args() {
+validate_context_mode() {
+  case "$1" in
+    default|long|auto) return 0 ;;
+    *) die "--context must be one of: default, long, auto" ;;
+  esac
+}
+
+normalize_launch_args() {
   normalized_args=()
+  selected_context_mode="${CLAUDE_COPILOT_CONTEXT:-}"
+  if [ -n "${selected_context_mode}" ]; then
+    validate_context_mode "${selected_context_mode}"
+  fi
+
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --)
+        normalized_args+=("$@")
+        break
+        ;;
       --model)
         normalized_args+=("$1")
         shift
@@ -182,12 +201,46 @@ normalize_model_args() {
       --model=*)
         normalized_args+=("--model=$(normalize_model_id "${1#--model=}")")
         ;;
+      --context)
+        shift
+        [ "$#" -gt 0 ] || die "--context requires one of: default, long, auto"
+        validate_context_mode "$1"
+        selected_context_mode="$1"
+        ;;
+      --context=*)
+        selected_context_mode="${1#--context=}"
+        validate_context_mode "${selected_context_mode}"
+        ;;
       *)
         normalized_args+=("$1")
         ;;
     esac
     shift
   done
+}
+
+model_from_args() {
+  local arg
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    case "${arg}" in
+      --model)
+        shift
+        [ "$#" -gt 0 ] || die "--model requires a value"
+        normalize_model_id "$1"
+        return 0
+        ;;
+      --model=*)
+        normalize_model_id "${arg#--model=}"
+        return 0
+        ;;
+      --)
+        return 1
+        ;;
+    esac
+    shift
+  done
+  return 1
 }
 
 settings_env_value() {
@@ -402,7 +455,109 @@ PY
   echo
   echo "Use any chat model with: claude-copilot --model <id>"
   echo "Claude Code --effort accepts: low, medium, high, xhigh, max"
+  echo "Gateway context selector: --context default|long|auto"
   echo "Catalog saved to: ${MODEL_CATALOG}"
+}
+
+apply_context_profile() {
+  local mode="$1"
+  local model="$2"
+  [ -n "${mode}" ] || return 0
+  [ -n "${model}" ] || die "--context requires a selected model"
+
+  python3 - "${MODEL_CATALOG}" "${COPILOT_CONFIG}" "${mode}" "${model}" "${CONTEXT_COMPACT_RATIO}" <<'PY'
+import json
+import math
+import pathlib
+import sys
+
+catalog_path = pathlib.Path(sys.argv[1])
+config_path = pathlib.Path(sys.argv[2])
+mode = sys.argv[3]
+selected_model = sys.argv[4]
+ratio = float(sys.argv[5])
+
+if mode not in {"default", "long", "auto"}:
+    raise SystemExit("--context must be one of: default, long, auto")
+if not (0 < ratio <= 1):
+    raise SystemExit("CLAUDE_COPILOT_CONTEXT_COMPACT_RATIO must be > 0 and <= 1")
+
+catalog = json.loads(catalog_path.read_text())
+models = [item for item in catalog.get("models", []) if item.get("kind") == "chat"]
+by_id = {}
+for item in models:
+    by_id[item["claude_model"]] = item
+    by_id[item.get("display_model", item["claude_model"])] = item
+    for alias in item.get("aliases", []):
+        by_id[alias] = item
+
+item = by_id.get(selected_model)
+if not item:
+    raise SystemExit(f"unknown model for --context: {selected_model}")
+
+tiers = {
+    tier.get("name"): tier.get("value")
+    for tier in item.get("context_tiers", [])
+    if isinstance(tier, dict) and isinstance(tier.get("value"), (int, float))
+}
+fallback = item.get("max_prompt") or item.get("context_window")
+if not isinstance(fallback, (int, float)) or fallback <= 0:
+    raise SystemExit(f"model has no usable context metadata for --context: {selected_model}")
+
+if mode == "default":
+    source = "default" if tiers.get("default") else "max_prompt"
+    budget = tiers.get("default") or fallback
+elif mode == "long":
+    source = "long" if tiers.get("long") else "max_prompt"
+    budget = tiers.get("long") or fallback
+else:
+    source = "long" if tiers.get("long") else ("default" if tiers.get("default") else "max_prompt")
+    budget = tiers.get("long") or tiers.get("default") or fallback
+
+threshold = max(1, int(math.floor(float(budget) * ratio)))
+config_path.parent.mkdir(parents=True, exist_ok=True)
+try:
+    raw = config_path.read_text()
+    config = json.loads(raw) if raw.strip() else {}
+except FileNotFoundError:
+    config = {}
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"config is not valid JSON: {config_path}: {exc}") from exc
+
+config["useResponsesApiContextManagement"] = True
+thresholds = config.setdefault("modelResponsesApiCompactThresholds", {})
+keys = [item["claude_model"]]
+if item.get("display_model") and item["display_model"] != item["claude_model"]:
+    keys.append(item["display_model"])
+
+changed = False
+for key in dict.fromkeys(keys):
+    if thresholds.get(key) != threshold:
+        thresholds[key] = threshold
+        changed = True
+
+if changed:
+    tmp = config_path.with_suffix(config_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(config, indent=2) + "\n")
+    tmp.replace(config_path)
+
+def tokens(value):
+    if value >= 900000:
+        return f"{value / 1000000:.1f}".rstrip("0").rstrip(".") + "M"
+    return f"{int(round(value / 1000))}k" if value >= 1000 else str(int(value))
+
+print(json.dumps({
+    "changed": changed,
+    "model": item["claude_model"],
+    "mode": mode,
+    "source": source,
+    "budget": budget,
+    "threshold": threshold,
+    "ratio": ratio,
+    "keys": keys,
+    "label": f"{tokens(budget)} {source} -> compact at {tokens(threshold)}",
+}))
+PY
 }
 
 cmd_pick_model() {
@@ -569,6 +724,7 @@ _claude_copilot() {
   _arguments \
     '--model[Claude Code model id]:model:->models' \
     '--effort[Claude Code effort level]:effort:(low medium high xhigh max)' \
+    '--context[Gateway compaction context tier]:context:(default long auto)' \
     '*::arg:->args'
 
   case "$state" in
@@ -606,7 +762,12 @@ _claude_copilot_complete() {
     return 0
   fi
 
-  COMPREPLY=( $(compgen -W "--model --effort --permission-mode --help" -- "${cur}") )
+  if [[ "${prev}" == "--context" ]]; then
+    COMPREPLY=( $(compgen -W "default long auto" -- "${cur}") )
+    return 0
+  fi
+
+  COMPREPLY=( $(compgen -W "--model --effort --context --permission-mode --help" -- "${cur}") )
 }
 
 complete -F _claude_copilot_complete claude-copilot
@@ -617,6 +778,7 @@ EOF
 complete -c claude-copilot -f -n 'not __fish_seen_subcommand_from (claude-copilot _complete-commands)' -a '(claude-copilot _complete-commands)'
 complete -c claude-copilot -f -l model -d 'Claude Code model id' -a '(claude-copilot _complete-models)'
 complete -c claude-copilot -f -l effort -d 'Claude Code effort level' -a 'low medium high xhigh max'
+complete -c claude-copilot -f -l context -d 'Gateway compaction context tier' -a 'default long auto'
 complete -c claude-copilot -f -n '__fish_seen_subcommand_from pick-model select-model model' -a '(claude-copilot _complete-models)'
 EOF
       ;;
@@ -721,16 +883,33 @@ esac
 
 ensure_settings
 harden_settings
+normalize_launch_args "$@"
+set -- "${normalized_args[@]}"
 start_server
 refresh_model_catalog
-normalize_model_args "$@"
-set -- "${normalized_args[@]}"
 
 claude_args=(--setting-sources "" --settings "${SETTINGS}")
+launch_model="$(model_from_args "$@" || true)"
 if ! has_cli_option "--model" "$@"; then
-  model="${CLAUDE_COPILOT_MODEL:-$(settings_env_value ANTHROPIC_MODEL)}"
-  if [ -n "${model}" ]; then
-    claude_args+=(--model "$(normalize_model_id "${model}")")
+  launch_model="${CLAUDE_COPILOT_MODEL:-$(settings_env_value ANTHROPIC_MODEL)}"
+  if [ -n "${launch_model}" ]; then
+    launch_model="$(normalize_model_id "${launch_model}")"
+    claude_args+=(--model "${launch_model}")
+  fi
+fi
+if [ -n "${selected_context_mode}" ]; then
+  context_result="$(apply_context_profile "${selected_context_mode}" "${launch_model}")"
+  context_changed="$(python3 -c 'import json,sys; print(str(json.loads(sys.stdin.read())["changed"]).lower())' <<<"${context_result}")"
+  context_label="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["label"])' <<<"${context_result}")"
+  echo "[claude-copilot] context ${selected_context_mode}: ${context_label}"
+  if [ "${context_changed}" = "true" ]; then
+    if [ -f "${PID_FILE}" ]; then
+      echo "[claude-copilot] restarting gateway to load context threshold ..."
+      stop_server
+      start_server
+    else
+      die "context threshold changed, but the running gateway was not started by this launcher. Restart copilot-api and rerun."
+    fi
   fi
 fi
 if ! has_cli_option "--effort" "$@"; then

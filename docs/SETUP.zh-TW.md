@@ -156,7 +156,16 @@ VS Code Copilot 可能會顯示 context-window / effort 控制，但在這個 la
 
 - **Effort** 走 Claude Code 的 `--effort` 參數。Claude Code 2.1.159 接受 `low`、`medium`、`high`、`xhigh`、`max`；provider metadata 可能還會回報 `none` 或 `minimal`，但目前 Claude Code CLI 不接受這兩個值。
 - **Context window** 來自你帳號的 model metadata。目前 VS Code Copilot 會用 `x-github-api-version: 2026-06-01` 打 Copilot models API，因此可看到 `200K(default)` 與 `long`（依模型約 `936k` 或 `922k` prompt）這種 tiers。launcher 會在啟動 gateway 前 patch 已安裝的 `copilot-api` bundle，讓它使用同一個 API version。
-- **Claude Code 在這個模式沒有 Context Size 選單**。launcher 會顯示同樣的 tier metadata，也接受 `gpt-5.5[1m]` 這種顯示 alias，但實際送 gateway 時會用 base model id（`gpt-5.5`）。它不能替其他使用者解鎖更大的 window，也不能強迫模型超過帳號/模型限制。
+- **Gateway context selector** 可用 `--context default|long|auto`。它會依選到的模型更新 `~/.local/share/copilot-api/config.json` 的 `modelResponsesApiCompactThresholds`，用 `tier * 0.8` 當 compact threshold；若值有改，會重啟 launcher 管的 gateway。這個門檻會保留到下次跑 `--context ...`；不帶 `--context` 啟動時不會改目前 gateway config。
+- **Claude Code 在這個模式仍沒有原生 Context Size 選單**。selector 只能減少 gateway 側 Responses API 太早 compact，不能強迫 Claude Code 前端送出更多 context。launcher 也接受 `gpt-5.5[1m]` 這種顯示 alias，但實際送 gateway 時會用 base model id（`gpt-5.5`）。
+
+範例：
+
+```sh
+claude-copilot --model gpt-5.5 --context default
+claude-copilot --model gpt-5.5 --context long
+claude-copilot --model gpt-5.5 --context auto
+```
 
 任何時候都可以用下面指令看你自己的 live values：
 

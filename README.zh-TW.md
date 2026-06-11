@@ -51,6 +51,7 @@ claude-copilot codex-models   # 原始 /codex/v1/models
 claude-copilot patch-api-version # 將 copilot-api 對齊 VS Code 目前 models API
 claude-copilot                # 啟動 gateway（若需要）並開 Claude Code
 claude-copilot --model gpt-5.5 "fix this"
+claude-copilot --model gpt-5.5 --context long "fix this"
 claude-copilot --model codex/gpt-5.4 "fix this"
 claude-copilot "fix this"     # 其他參數直接傳給 claude
 claude-copilot status         # gateway health
@@ -94,7 +95,17 @@ Effort 走 Claude Code 自己的 `--effort` 參數。Claude Code 2.1.159 接受 
 
 目前 VS Code Copilot 使用較新的 Copilot models API（`2026-06-01`），會回傳 `200K(default)` 與 `long`（依模型約 `936k` 或 `922k` prompt）這類 context tiers。launcher 會在啟動 gateway 前 patch 已安裝的 `copilot-api` bundle，把上游 API version 對齊這個版本，因為 upstream `copilot-api` 可能還停在舊日期；若之後 upstream 跟上，可用 `CLAUDE_COPILOT_UPSTREAM_API_VERSION` 覆蓋。
 
-Claude Code 在這個模式沒有 VS Code 的 Context Size 選單。wrapper 可以顯示同樣的 tier metadata，也接受像 `gpt-5.5[1m]` 這種 alias，但實際送 request 前會移除 `[1m]`，因為本機 gateway 接受的是 `gpt-5.5` 這種 base model id。它也不能替其他帳號解鎖更大的 window；long-context tier 必須出現在你自己的 model metadata。請用下面指令看 live values：
+Claude Code 在這個模式沒有 VS Code 的 Context Size 選單，但 launcher 有提供最低摩擦的 gateway 側近似控制：
+
+```sh
+claude-copilot --model gpt-5.5 --context default   # 接近 default tier 時壓縮
+claude-copilot --model gpt-5.5 --context long      # 接近 long tier 時壓縮
+claude-copilot --model gpt-5.5 --context auto      # 有 long 就 long，否則 default
+```
+
+這會依選到的模型更新 `~/.local/share/copilot-api/config.json` 裡的 `modelResponsesApiCompactThresholds`，必要時重啟 launcher 管的 gateway，因為 `copilot-api` server process 會 cache config。預設 threshold 是 `tier * 0.8`；可用 `CLAUDE_COPILOT_CONTEXT_COMPACT_RATIO` 覆蓋比例。這個設定會留在 gateway config，直到下次跑 `--context ...`；不帶 `--context` 啟動時不會改目前門檻。
+
+這仍不是 Claude Code 原生 context-size flag；它可以避免 gateway 側 Responses API 太早 compact，但不能強迫 Claude Code 前端送出更多 context。wrapper 也接受像 `gpt-5.5[1m]` 這種 alias，但實際送 request 前會移除 `[1m]`，因為本機 gateway 接受的是 `gpt-5.5` 這種 base model id。請用下面指令看 live values：
 
 ```sh
 claude-copilot models

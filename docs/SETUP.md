@@ -173,10 +173,25 @@ different things here:
   2026-06-01`, which exposes tiers like `200K(default)` and `long` (`936k` or
   `922k` prompt, depending on model). The launcher patches the installed
   `copilot-api` bundle to use that API version before starting the gateway.
-- **Claude Code has no Context Size picker** in this mode. The launcher displays
-  the same tier metadata and accepts display aliases like `gpt-5.5[1m]`, but it
-  sends the base model id (`gpt-5.5`) to the gateway. It cannot unlock larger
-  windows for other users or force a model beyond the account/model limit.
+- **Gateway context selector** is available as `--context default|long|auto`.
+  It updates `~/.local/share/copilot-api/config.json`
+  `modelResponsesApiCompactThresholds` for the selected model, using `tier * 0.8`
+  as the compact threshold, then restarts the launcher-managed gateway if the
+  value changed. The threshold persists until the next `--context ...` run;
+  launching without `--context` leaves the current gateway config unchanged.
+- **Claude Code still has no native Context Size picker** in this mode. The
+  selector reduces gateway-side Responses API compaction from happening too
+  early, but it cannot force Claude Code itself to send more context. The
+  launcher also accepts display aliases like `gpt-5.5[1m]`, but sends the base
+  model id (`gpt-5.5`) to the gateway.
+
+Examples:
+
+```sh
+claude-copilot --model gpt-5.5 --context default
+claude-copilot --model gpt-5.5 --context long
+claude-copilot --model gpt-5.5 --context auto
+```
 
 Run this anytime to see your live account-specific values:
 
