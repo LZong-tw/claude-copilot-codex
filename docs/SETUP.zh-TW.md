@@ -100,7 +100,7 @@ claude-copilot "幫我看這段程式"   # 後面參數直接傳給 claude
 
 ### 模型如何餵進 Claude Code
 
-`claude-copilot models` 會同時抓：
+`claude-copilot models` 會同時抓兩個 endpoint，寫成合併 catalog，並印出各模型回報的 context window、prompt/output 上限、reasoning effort：
 
 - Copilot `/v1/models`：原樣餵給 Claude Code，例如 `claude-opus-4.8`、
   `claude-sonnet-4.6`、`gpt-5.5`、`gpt-5.3-codex`、Gemini 等。
@@ -149,6 +149,19 @@ Claude Code 的 `--model` 參數。
 `--setting-sources ""` 會刻意不讀公司用的全域 settings，所以啟動器會另外**只讀**
 `~/.claude/settings.json` 的 `effortLevel`，並原封不動用 `--effort <值>` 塞回
 Claude Code；如果你自己已經傳 `--effort`，就以你手動指定為準。
+
+### Context window 和 effort
+
+VS Code Copilot 可能會顯示 context-window / effort 控制，但在這個 launcher 裡它們對應到兩件不同的事：
+
+- **Effort** 走 Claude Code 的 `--effort` 參數。Claude Code 2.1.159 接受 `low`、`medium`、`high`、`xhigh`、`max`；provider metadata 可能還會回報 `none` 或 `minimal`，但目前 Claude Code CLI 不接受這兩個值。
+- **Context window** 是你的帳號在該模型 metadata 回報的服務端上限。launcher 會顯示 `context_window`、`max_prompt`、`max_output`，但不能替其他使用者解鎖更大的 window，也不能強迫模型超過帳號/模型限制。
+
+任何時候都可以用下面指令看你自己的 live values：
+
+```sh
+claude-copilot models
+```
 
 各 Copilot 模型相對完整 Claude Code 1M context + 高 effort 的能力減損估算，見
 [`docs/COPILOT_MODEL_DEGRADATION.zh-TW.md`](COPILOT_MODEL_DEGRADATION.zh-TW.md)。

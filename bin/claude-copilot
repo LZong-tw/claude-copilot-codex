@@ -163,34 +163,61 @@ def load(path):
     with urllib.request.urlopen(url, timeout=10) as response:
         data = json.load(response)
     items = data.get("data", data if isinstance(data, list) else [])
-    return [item.get("id") if isinstance(item, dict) else str(item) for item in items]
+    return [item if isinstance(item, dict) else {"id": str(item)} for item in items]
+
+def model_record(item, provider, source):
+    upstream_id = str(item.get("id", ""))
+    model_id = upstream_id
+    if provider == "codex" and not upstream_id.startswith("codex/"):
+        model_id = f"codex/{upstream_id}"
+
+    capabilities = item.get("capabilities") or {}
+    limits = capabilities.get("limits") or {}
+    supports = capabilities.get("supports") or {}
+    vision_limits = limits.get("vision") if isinstance(limits.get("vision"), dict) else {}
+    kind = capabilities.get("type") or ("embedding" if "embedding" in model_id else "chat")
+    if kind == "embeddings":
+        kind = "embedding"
+
+    record = {
+        "id": model_id,
+        "claude_model": model_id,
+        "provider": provider,
+        "source": source,
+        "kind": kind,
+        "name": item.get("name") or item.get("display_name") or upstream_id,
+        "vendor": item.get("vendor") or item.get("owned_by") or "",
+        "context_window": limits.get("max_context_window_tokens"),
+        "max_prompt": limits.get("max_prompt_tokens"),
+        "max_output": limits.get("max_output_tokens"),
+        "max_non_streaming_output": limits.get("max_non_streaming_output_tokens"),
+        "reasoning_effort": supports.get("reasoning_effort") or [],
+        "min_thinking_budget": supports.get("min_thinking_budget"),
+        "max_thinking_budget": supports.get("max_thinking_budget"),
+        "vision": supports.get("vision"),
+        "max_prompt_images": vision_limits.get("max_prompt_images"),
+        "tool_calls": supports.get("tool_calls"),
+        "parallel_tool_calls": supports.get("parallel_tool_calls"),
+        "structured_outputs": supports.get("structured_outputs"),
+        "streaming": supports.get("streaming"),
+        "price_category": item.get("model_picker_price_category") or "",
+    }
+    if provider == "codex":
+        record["upstream_id"] = upstream_id
+    return record
 
 models = []
 errors = {}
 
 try:
-    for model_id in load("/v1/models"):
-        models.append({
-            "id": model_id,
-            "claude_model": model_id,
-            "provider": "copilot",
-            "source": "/v1/models",
-            "kind": "embedding" if "embedding" in model_id else "chat",
-        })
+    for item in load("/v1/models"):
+        models.append(model_record(item, "copilot", "/v1/models"))
 except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
     errors["copilot"] = str(exc)
 
 try:
-    for upstream_id in load("/codex/v1/models"):
-        model_id = upstream_id if upstream_id.startswith("codex/") else f"codex/{upstream_id}"
-        models.append({
-            "id": model_id,
-            "claude_model": model_id,
-            "provider": "codex",
-            "upstream_id": upstream_id,
-            "source": "/codex/v1/models",
-            "kind": "chat",
-        })
+    for item in load("/codex/v1/models"):
+        models.append(model_record(item, "codex", "/codex/v1/models"))
 except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
     errors["codex"] = str(exc)
 
@@ -216,13 +243,32 @@ import json
 import sys
 
 data = json.load(open(sys.argv[1]))
+
+def tokens(value):
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, (int, float)):
+        return f"{int(value / 1000)}k" if value >= 1000 else str(int(value))
+    return str(value)
+
+def effort(value):
+    return "/".join(value) if value else "-"
+
 print(f"generated_at: {data['generated_at']}")
 print(f"base_url: {data['base_url']}")
 print()
-print("provider  kind       claude-code --model")
-print("--------  ---------  -------------------")
+print("provider  kind       ctx    prompt  output  effort                         claude-code --model")
+print("--------  ---------  -----  ------  ------  -----------------------------  -------------------")
 for item in data["models"]:
-    print(f"{item['provider']:<8}  {item['kind']:<9}  {item['claude_model']}")
+    print(
+        f"{item['provider']:<8}  "
+        f"{item['kind']:<9}  "
+        f"{tokens(item.get('context_window')):<5}  "
+        f"{tokens(item.get('max_prompt')):<6}  "
+        f"{tokens(item.get('max_output')):<6}  "
+        f"{effort(item.get('reasoning_effort')):<29}  "
+        f"{item['claude_model']}"
+    )
 if data.get("errors"):
     print()
     for provider, error in data["errors"].items():
@@ -230,6 +276,7 @@ if data.get("errors"):
 PY
   echo
   echo "Use any chat model with: claude-copilot --model <id>"
+  echo "Claude Code --effort accepts: low, medium, high, xhigh, max"
   echo "Catalog saved to: ${MODEL_CATALOG}"
 }
 
@@ -281,7 +328,10 @@ else:
     for index, item in enumerate(models, 1):
         mark = " *" if item["claude_model"] == current else ""
         quota = "ChatGPT" if item["provider"] == "codex" else "Copilot"
-        print(f"{index:2d}. {item['claude_model']:<30} {item['provider']:<7} {quota}{mark}")
+        ctx = item.get("context_window")
+        ctx_label = f"{int(ctx / 1000)}k" if isinstance(ctx, (int, float)) and ctx >= 1000 else "-"
+        effort = "/".join(item.get("reasoning_effort") or []) or "-"
+        print(f"{index:2d}. {item['claude_model']:<30} {item['provider']:<7} {quota:<7} ctx {ctx_label:<5} effort {effort}{mark}")
     print()
     try:
         raw = input("Choose number or model id (blank keeps current): ").strip()

@@ -68,7 +68,8 @@ claude-copilot usage         # Copilot quota + local token usage (incl. Codex)
 ## Choosing the model
 
 `claude-copilot models` refreshes `~/.config/claude-copilot/models.json` from both
-gateway endpoints and prints every model id Claude Code can receive:
+gateway endpoints and prints every model id Claude Code can receive, plus the
+reported context window, prompt/output limits, and reasoning effort levels:
 
 - Copilot `/v1/models` as-is, e.g. `claude-opus-4.8`, `gpt-5.5`, `gpt-5.3-codex`.
 - Codex `/codex/v1/models` with the required `codex/` prefix, e.g.
@@ -99,6 +100,21 @@ claude-copilot completion fish | source
 Because `--setting-sources ""` intentionally prevents loading your global
 settings, the launcher copies through only the global `effortLevel` value by
 passing `--effort <value>` unless you already provided `--effort` yourself.
+
+## Context window and effort
+
+Effort is exposed through Claude Code's own `--effort` flag. Claude Code 2.1.159
+accepts `low`, `medium`, `high`, `xhigh`, and `max`; the launcher preserves your
+global `effortLevel` or your explicit `claude-copilot --effort ...` choice.
+
+Context window is not a local toggle. It is the server-side limit reported by
+your Copilot/Codex account for each model, so this repo can display and use the
+reported `context_window`, `max_prompt`, and `max_output` metadata, but it cannot
+unlock larger windows for other users. Check your live values with:
+
+```sh
+claude-copilot models
+```
 
 ## Usage & quota
 

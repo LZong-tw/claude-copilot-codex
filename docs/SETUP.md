@@ -111,7 +111,9 @@ Why does `/v1/models` not include standalone Codex? That is how `copilot-api` se
 
 ### How models are passed into Claude Code
 
-`claude-copilot models` fetches both:
+`claude-copilot models` fetches both endpoints, saves a merged catalog, and
+prints each model's reported context window, prompt/output limits, and reasoning
+effort levels:
 
 - Copilot `/v1/models` as-is, e.g. `claude-opus-4.8`, `gpt-5.5`, `gpt-5.3-codex`.
 - Codex `/codex/v1/models` with the required `codex/` prefix, e.g. `codex/gpt-5.4`.
@@ -156,6 +158,26 @@ Then `claude-copilot --model <TAB>` and `claude-copilot pick-model <TAB>` comple
 If you omit `--model`, the launcher reads `ANTHROPIC_MODEL` from `~/.config/claude-copilot/settings.json` and passes it to Claude Code as `--model`.
 
 Because `--setting-sources ""` intentionally prevents loading global settings, the launcher separately reads only `effortLevel` from `~/.claude/settings.json` and passes it through as `--effort <value>`. If you provide `--effort` yourself, your explicit value wins.
+
+### Context window and effort
+
+VS Code Copilot may show context-window and effort controls, but they map to two
+different things here:
+
+- **Effort** is exposed through Claude Code's `--effort` flag. Claude Code 2.1.159
+  accepts `low`, `medium`, `high`, `xhigh`, and `max`; provider metadata may also
+  report values like `none` or `minimal`, but those are not accepted by Claude
+  Code's CLI today.
+- **Context window** is the server-side limit returned by the model metadata for
+  your account. The launcher displays `context_window`, `max_prompt`, and
+  `max_output`, but it cannot unlock larger windows for other users or force a
+  model beyond the account/model limit.
+
+Run this anytime to see your live account-specific values:
+
+```sh
+claude-copilot models
+```
 
 See [`COPILOT_MODEL_DEGRADATION.zh-TW.md`](COPILOT_MODEL_DEGRADATION.zh-TW.md) for model-by-model capability tradeoff estimates versus full Claude Code 1M context + higher-effort usage.
 
@@ -244,4 +266,3 @@ sqlite3 ~/.local/share/copilot-api/copilot-api.sqlite \
 ## 9. Optional: CCR (`claude-code-router`)
 
 This launcher already covers Copilot + Codex with one front end. You only need CCR if you want scenario-based routing across multiple providers, such as default / background / longContext / think. In that case, add `http://localhost:4141` as one CCR provider.
-
